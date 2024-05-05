@@ -1,0 +1,25 @@
+arg1 = [0, 0, 1, 1];
+arg2 = [0, 1, 0, 1];
+inputVals = [arg1; arg2]';
+output = [0, 1, 1, 0]';
+numFeatures = 2;
+
+%% vals
+layers = [ ...
+    featureInputLayer(numFeatures)
+    fullyConnectedLayer(2)
+    fullyConnectedLayer(1)
+    classificationLayer
+    ];
+
+
+options = trainingOptions('adam', ...
+    'Plots','training-progress', ...
+    'Verbose',false);
+
+net = trainNetwork(inputVals, output, layers, options);
+
+YPred = classify(net, inputVals);
+% YTest = imdsTest(:, nlabels + 1);
+
+accuracy = sum(YPred == output) / numel(output)

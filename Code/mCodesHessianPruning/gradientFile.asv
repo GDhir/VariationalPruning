@@ -1,0 +1,89 @@
+lgraph = layerGraph(net);
+lgraph = removeLayers(lgraph, 'classoutput');
+dlnet = dlnetwork(lgraph);
+
+ohtResponseTrain = dlarray( double( onehotencode( responseTrain, 2 ) ) )';
+dlDataTrain =  dlarray( double( imdsTrain ), "BC" );
+
+% [loss,gradients,state] = modelLoss(dlnet, dlarray( single( imdsTrain ), "BC" ),...
+%     dlarray(double( ohtResponseTrain ), "BC") );
+nSamples = size( dlDataTrain, 2 );
+
+oneSampleTrain = dlDataTrain( :, 1 );
+oneResponseTrain = ohtResponseTrain( :, 1 );
+
+[loss, gradients] = dlfeval(@modelLoss, dlnet, oneSampleTrain, oneResponseTrain);
+
+gradientArr = [];
+nParams = size( gradients, 1 );
+
+for idx = 1:nParams
+
+    newGrads = gradients( idx, 3 ).Value{:};
+    szVal = size( newGrads );
+    szVal = szVal(1) * szVal(2);
+    
+    gradientArr = [ gradientArr; reshape( newGrads, [szVal, 1] ) ];
+
+end
+
+gradientSz = size( gradientArr, 1 );
+alpha = 1e-4;
+
+HsInv = eye( gradientSz) / alpha;
+HsVal = eye( gradientSz) * alpha;
+
+for idx = 1:nSamples
+
+    oneSampleTrain = dlDataTrain( :, idx );
+    oneResponseTrain = ohtResponseTrain( :, idx );
+    
+    [loss, gradients] = dlfeval(@modelLoss, dlnet, oneSampleTrain, oneResponseTrain);
+    
+    gradientArr = [];
+    nParams = size( gradients, 1 );
+    
+    curIdx = 1;
+    for paramIdx = 1:nParams
+    
+        newGrads = gradients( paramIdx, 3 ).Value{:};
+        szVal = size( newGrads );
+        szVal = szVal(1) * szVal(2);
+        
+        gradientArr = [ gradientArr; reshape( newGrads, [szVal, 1] ) ];
+        
+        curIdx = curIdx + szVal;
+    end
+
+    % gradientArr = double(gradientArr);
+
+    HsVal = HsVal + ( gradientArr * gradientArr' ) / nSamples;
+    % HsInv = HsInv - ( HsInv * ( gradientArr * gradientArr' ) * HsInv ) /...
+    %     ( nSamples + gradientArr' * HsInv * gradientArr );
+
+    % disp(idx)
+
+end
+
+%% Find weight to prune using saliency score
+weightVals = [];
+for paramIdx = 1:nParams
+    
+    weights = dlnet.Learnables( paramIdx, 3 ).Value{:};
+    szVal = size( weights );
+    szVal = szVal(1) * szVal(2);
+    weightVals = [ weightVals; reshape( weights, [szVal, 1] ) ];
+
+end
+
+szW = size(weightVals, 1);
+lossIncrease = zeros(size(weightVals));
+HsInv = inv( extractdata( HsVal ) );
+
+for idx = 1:szW
+    
+    lossIncrease(idx, 1) = ( weightVals(idx) ^ 2 ) / 2 / HsInv( idx, idx );
+    
+end
+
+[minLossInc, minIdx] = min( lossIncrease )

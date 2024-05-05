@@ -1,0 +1,58 @@
+clc; clear;
+
+%% Get fully trained network and compute prediction accuracy
+[net, inputTrain, responseTrain] = getTrainedXORNetwork();
+YPred = predict(net, inputTrain);
+% YTest = imdsTest(:, nlabels + 1);
+accuracy = sum(YPred == responseTrain) / numel(responseTrain);
+
+%% Get DLNet representation, dlarray for response and training data
+lgraph = layerGraph(net);
+lgraph = removeLayers(lgraph, 'classoutput');
+dlnet = dlnetwork(lgraph);
+
+ohtResponseTrain = dlarray( double( onehotencode( responseTrain, 2 ) ) )';
+dlDataTrain =  dlarray( double( inputTrain ), "BC" );
+nSamples = size( dlDataTrain, 2 );
+
+oneSampleTrain = dlDataTrain( :, 1 );
+oneResponseTrain = ohtResponseTrain( :, 1 );
+
+%% Get Network Gradient and Hessian/Hessian Inverse
+[nParams, gradientArr] = getLinearizedNetworkGradient( dlnet, oneSampleTrain, oneResponseTrain );
+
+gradientSz = size( gradientArr, 1 );
+alpha = 1e-4;
+
+% Hessian Inverse
+HsInv = eye( gradientSz) / alpha;
+
+% Hessian
+% HsVal = eye( gradientSz) * alpha;
+
+for idx = 1:nSamples
+
+    oneSampleTrain = dlDataTrain( :, idx );
+    oneResponseTrain = ohtResponseTrain( :, idx );
+    
+    gradientArr = getLinearizedNetworkGradient( dlnet, oneSampleTrain, oneResponseTrain );
+
+    % Calculation of Hessian
+    % HsVal = HsVal + ( gradientArr * gradientArr' ) / nSamples;
+
+    % Direct Calculation of Hessian Inverse using Expectation Approximation
+    HsInv = HsInv - ( HsInv * ( gradientArr * gradientArr' ) * HsInv ) /...
+        ( nSamples + gradientArr' * HsInv * gradientArr );
+
+end
+
+%% Find weight to prune using saliency score
+weightVals = getLinearizedNetworkWeights( dlnet, nParams );
+
+% Direct Calculation of Inverse using Hessian
+% HsInv = inv( extractdata( HsVal ) );
+
+[minWeightIdx, minLossInc] = getWeightToPrune( weightVals, HsInv );
+
+disp(minWeightIdx)
+disp(minLossInc)
